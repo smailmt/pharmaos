@@ -1,0 +1,36 @@
+# Caddy configuration — PharmaOS production
+#
+# {$DOMAIN} → API + frontend en single origin via reverse proxy.
+# Caddy gère automatiquement les certificats HTTPS via Let's Encrypt.
+
+{$DOMAIN} {
+    # Frontend statique (SPA) sur /
+    @api path /api/* /docs /redoc /openapi.json /health
+    handle @api {
+        reverse_proxy api:8000
+    }
+
+    # Tout le reste → frontend SPA
+    handle {
+        reverse_proxy frontend:80
+    }
+
+    # Sécurité de base
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        Permissions-Policy "geolocation=(), camera=(self), microphone=()"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        # Camera autorisée pour la PWA (scan codes-barres)
+    }
+
+    # Compression
+    encode zstd gzip
+
+    # Logs
+    log {
+        output stdout
+        format console
+    }
+}
