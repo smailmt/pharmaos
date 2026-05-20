@@ -1,37 +1,29 @@
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-*.egg-info/
 .pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# Env
-.env
-.env.local
 .venv/
 venv/
-env/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-.DS_Store
-
-# Logs
+*.egg-info/
+# Node
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+build/
+# Docker / data
+postgres_data/
+redis_data/
+# Logs / OS
 *.log
-logs/
-
-# Docker
-.docker/
-
-# Tests
-.coverage
-htmlcov/
-
-# OS
-Thumbs.db
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.zip
