@@ -11,6 +11,7 @@ import uuid
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from sqlalchemy import select, func, update
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.supplier import (
@@ -97,6 +98,81 @@ class SupplierService:
 
         await self.db.flush()
         return po
+
+    async def update_purchase_order(
+        self,
+        po_id: uuid.UUID,
+        expected_delivery_date=None,
+        notes=None,
+        items: list[dict] | None = None,
+    ) -> PurchaseOrder:
+        # Charger avec items pour pouvoir manipuler la collection ORM
+        result = await self.db.execute(
+            select(PurchaseOrder)
+            .options(selectinload(PurchaseOrder.items))
+            .where(PurchaseOrder.id == po_id)
+        )
+        po = result.scalar_one_or_none()
+        if not po or po.pharmacy_id != self.pharmacy_id:
+            raise ValueError("BC introuvable")
+        if po.status != "draft":
+            raise ValueError("Seuls les bons en brouillon peuvent être modifiés")
+        if expected_delivery_date is not None:
+            po.expected_delivery_date = expected_delivery_date
+        if notes is not None:
+            po.notes = notes
+        if items is not None:
+            # Vider via la relation (cascade delete-orphan supprime en DB)
+            po.items.clear()
+            await self.db.flush()
+            total_ht = Decimal("0")
+            total_vat = Decimal("0")
+            total_discount = Decimal("0")
+            for it in items:
+                qty = int(it["quantity_ordered"])
+                unit_ht = Decimal(str(it["unit_price_ht"]))
+                discount = Decimal(str(it.get("discount_rate", 0)))
+                vat = Decimal(str(it.get("vat_rate", "0.07")))
+                line_ht_gross = unit_ht * qty
+                line_discount = line_ht_gross * discount
+                line_ht_net = line_ht_gross - line_discount
+                line_vat = line_ht_net * vat
+                line_ttc = line_ht_net + line_vat
+                new_item = PurchaseOrderItem(
+                    pharmacy_id=self.pharmacy_id,
+                    product_id=uuid.UUID(str(it["product_id"])),
+                    quantity_ordered=qty,
+                    unit_price_ht=unit_ht,
+                    discount_rate=discount,
+                    vat_rate=vat,
+                    line_total_ht=line_ht_net.quantize(Decimal("0.01")),
+                    line_total_ttc=line_ttc.quantize(Decimal("0.01")),
+                )
+                po.items.append(new_item)  # maj collection ORM + cascade
+                total_ht += line_ht_net
+                total_vat += line_vat
+                total_discount += line_discount
+            po.total_ht = total_ht.quantize(Decimal("0.01"))
+            po.total_vat = total_vat.quantize(Decimal("0.01"))
+            po.total_discount = total_discount.quantize(Decimal("0.01"))
+            po.total_ttc = (total_ht + total_vat).quantize(Decimal("0.01"))
+        await self.db.flush()
+        return po
+
+    async def delete_purchase_order(self, po_id: uuid.UUID) -> None:
+        result = await self.db.execute(
+            select(PurchaseOrder)
+            .options(selectinload(PurchaseOrder.items))
+            .where(PurchaseOrder.id == po_id)
+        )
+        po = result.scalar_one_or_none()
+        if not po or po.pharmacy_id != self.pharmacy_id:
+            raise ValueError("BC introuvable")
+        if po.status != "draft":
+            raise ValueError("Seuls les bons en brouillon peuvent être supprimés")
+        # La cascade delete-orphan supprime les items automatiquement
+        await self.db.delete(po)
+        await self.db.flush()
 
     async def send_purchase_order(self, po_id: uuid.UUID) -> PurchaseOrder:
         po = await self.db.get(PurchaseOrder, po_id)

@@ -17,7 +17,7 @@ from app.models.supplier import (
 from app.schemas.supplier import (
     SupplierCreate, SupplierUpdate, SupplierOut, SupplierDetailOut,
     SupplierProductCreate, SupplierProductOut,
-    PurchaseOrderCreate, PurchaseOrderOut,
+    PurchaseOrderCreate, PurchaseOrderUpdate, PurchaseOrderOut,
     DeliveryNoteCreate, DeliveryNoteOut,
     SupplierInvoiceCreate, SupplierInvoiceOut,
     SupplierPaymentCreate, SupplierPaymentOut,
@@ -394,6 +394,44 @@ def _invoice_to_out(invoice: SupplierInvoice) -> SupplierInvoiceOut:
         delivery_note_ids=invoice.delivery_note_ids or [],
         created_at=invoice.created_at,
     )
+
+
+@router.put("/orders/{order_id}", response_model=PurchaseOrderOut)
+async def update_purchase_order(
+    order_id: uuid.UUID,
+    payload: PurchaseOrderUpdate,
+    db: AsyncSession = Depends(get_db),
+    pharmacy_id: uuid.UUID = Depends(get_current_pharmacy_id),
+):
+    svc = SupplierService(db, pharmacy_id)
+    try:
+        await svc.update_purchase_order(
+            po_id=order_id,
+            expected_delivery_date=payload.expected_delivery_date,
+            notes=payload.notes,
+            items=[i.model_dump() for i in payload.items] if payload.items is not None else None,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    result = await db.execute(
+        select(PurchaseOrder)
+        .options(selectinload(PurchaseOrder.items))
+        .where(PurchaseOrder.id == order_id)
+    )
+    return result.scalar_one()
+
+
+@router.delete("/orders/{order_id}", status_code=204)
+async def delete_purchase_order(
+    order_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    pharmacy_id: uuid.UUID = Depends(get_current_pharmacy_id),
+):
+    svc = SupplierService(db, pharmacy_id)
+    try:
+        await svc.delete_purchase_order(order_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 # ---------- Routes paramétrées (DÉFINIES EN DERNIER) ----------

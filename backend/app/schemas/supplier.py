@@ -101,6 +101,12 @@ class PurchaseOrderCreate(APIModel):
     items: list[PurchaseOrderItemCreate]
 
 
+class PurchaseOrderUpdate(APIModel):
+    expected_delivery_date: date | None = None
+    notes: str | None = None
+    items: list[PurchaseOrderItemCreate] | None = None
+
+
 class PurchaseOrderOut(APIModel):
     id: uuid.UUID
     order_number: str

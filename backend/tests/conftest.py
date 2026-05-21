@@ -11,11 +11,13 @@ import sys
 from pathlib import Path
 
 # Variables d'env AVANT tout import app
+# IMPORTANT : on force POSTGRES_DB=pharmaos_test (pas setdefault) pour ne jamais
+# truncater la DB de production même si POSTGRES_DB est déjà défini dans l'env Docker.
 os.environ["APP_ENV"] = "test"
+os.environ["POSTGRES_DB"] = "pharmaos_test"
 os.environ.setdefault("SECRET_KEY", "test-secret-key-min-32-chars-long-for-testing-only")
 os.environ.setdefault("POSTGRES_USER", "pharmaos")
 os.environ.setdefault("POSTGRES_PASSWORD", "pharmaos_dev")
-os.environ.setdefault("POSTGRES_DB", "pharmaos_test")
 os.environ.setdefault("POSTGRES_HOST", "localhost")
 os.environ.setdefault("POSTGRES_PORT", "5432")
 

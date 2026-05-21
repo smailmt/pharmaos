@@ -21,6 +21,7 @@ import {
   Lightbulb,
   Download,
   TrendingDown,
+  Pencil,
 } from "lucide-react";
 import { api, extractErrorMessage } from "@/lib/api";
 import { formatMAD, formatDate } from "@/lib/utils";
@@ -91,6 +92,12 @@ function useSuppliersAndProducts() {
 // =============================================================
 // COMMANDES (Bons de commande)
 // =============================================================
+interface PurchaseOrderItem {
+  product_id: string;
+  quantity_ordered: number;
+  unit_price_ht: string;
+}
+
 interface PurchaseOrder {
   id: string;
   order_number: string;
@@ -100,11 +107,13 @@ interface PurchaseOrder {
   sent_at: string | null;
   total_ttc: string;
   status: string;
+  items: PurchaseOrderItem[];
 }
 
 export function OrdersTab() {
   const qc = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
+  const [editOrder, setEditOrder] = useState<PurchaseOrder | null>(null);
   const { suppliers } = useSuppliersAndProducts();
 
   const { data: orders, isLoading } = useQuery({
@@ -121,7 +130,18 @@ export function OrdersTab() {
     onError: (err) => toast.error("Erreur", extractErrorMessage(err)),
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/suppliers/orders/${id}`),
+    onSuccess: () => {
+      toast.success("Commande supprimée");
+      qc.invalidateQueries({ queryKey: ["purchase-orders"] });
+    },
+    onError: (err) => toast.error("Erreur", extractErrorMessage(err)),
+  });
+
   const supplierName = (id: string) => suppliers.find((s) => s.id === id)?.name ?? "—";
+
+  const refresh = () => qc.invalidateQueries({ queryKey: ["purchase-orders"] });
 
   return (
     <div className="space-y-4">
@@ -162,11 +182,20 @@ export function OrdersTab() {
                   <TableCell className="text-right font-medium">{formatMAD(o.total_ttc)}</TableCell>
                   <TableCell><StatusBadge status={o.status} /></TableCell>
                   <TableCell className="text-right">
-                    {o.status === "draft" && (
-                      <Button size="sm" variant="ghost" onClick={() => sendMutation.mutate(o.id)}>
-                        <Send className="h-3.5 w-3.5 mr-1" /> Envoyer
-                      </Button>
-                    )}
+                    {o.status === "draft" ? (
+                      <div className="flex justify-end gap-1">
+                        <Button size="sm" variant="ghost" onClick={() => setEditOrder(o)}>
+                          <Pencil className="h-3.5 w-3.5 mr-1" /> Modifier
+                        </Button>
+                        <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700"
+                          onClick={() => { if (confirm("Supprimer cette commande ?")) deleteMutation.mutate(o.id); }}>
+                          <Trash2 className="h-3.5 w-3.5 mr-1" /> Supprimer
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => sendMutation.mutate(o.id)}>
+                          <Send className="h-3.5 w-3.5 mr-1" /> Envoyer
+                        </Button>
+                      </div>
+                    ) : null}
                   </TableCell>
                 </TableRow>
               ))}
@@ -177,8 +206,16 @@ export function OrdersTab() {
 
       <CreateOrderDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreated={() => {
         setCreateOpen(false);
-        qc.invalidateQueries({ queryKey: ["purchase-orders"] });
+        refresh();
       }} />
+
+      {editOrder && (
+        <EditOrderDialog
+          order={editOrder}
+          onClose={() => setEditOrder(null)}
+          onSaved={() => { setEditOrder(null); refresh(); }}
+        />
+      )}
     </div>
   );
 }
@@ -278,6 +315,102 @@ function CreateOrderDialog({ open, onClose, onCreated }: { open: boolean; onClos
           <Button onClick={() => mutation.mutate()} disabled={!supplierId || lines.length === 0 || lines.some((l) => !l.product_id) || mutation.isPending}>
             {mutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             Créer la commande
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditOrderDialog({ order, onClose, onSaved }: { order: PurchaseOrder; onClose: () => void; onSaved: () => void }) {
+  const { products } = useSuppliersAndProducts();
+  const [lines, setLines] = useState<Array<{ product_id: string; quantity_ordered: number; unit_price_ht: string }>>(
+    order.items.map((it) => ({
+      product_id: it.product_id,
+      quantity_ordered: it.quantity_ordered,
+      unit_price_ht: String(it.unit_price_ht),
+    }))
+  );
+
+  const addLine = () => setLines([...lines, { product_id: "", quantity_ordered: 1, unit_price_ht: "0" }]);
+  const updateLine = (i: number, patch: Partial<(typeof lines)[number]>) =>
+    setLines(lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  const removeLine = (i: number) => setLines(lines.filter((_, idx) => idx !== i));
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.put(`/suppliers/orders/${order.id}`, {
+        items: lines.map((l) => ({
+          product_id: l.product_id,
+          quantity_ordered: l.quantity_ordered,
+          unit_price_ht: parseFloat(l.unit_price_ht || "0").toFixed(4),
+          discount_rate: "0",
+          vat_rate: "0.07",
+        })),
+      }),
+    onSuccess: () => {
+      toast.success("Commande mise à jour");
+      onSaved();
+    },
+    onError: (err) => toast.error("Erreur", extractErrorMessage(err)),
+  });
+
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Modifier la commande {order.order_number}</DialogTitle>
+          <DialogDescription>Modifiez les lignes de ce bon de commande (brouillon).</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <Label>Produits</Label>
+              <Button size="sm" variant="outline" onClick={addLine}><Plus className="h-3 w-3 mr-1" /> Ligne</Button>
+            </div>
+            {lines.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic py-2">Aucune ligne. Cliquez "Ligne" pour ajouter un produit.</p>
+            ) : (
+              <div className="space-y-2">
+                {lines.map((line, i) => (
+                  <div key={i} className="flex gap-2 items-end">
+                    <div className="flex-1">
+                      <select
+                        value={line.product_id}
+                        onChange={(e) => {
+                          const p = products.find((x) => x.id === e.target.value);
+                          updateLine(i, { product_id: e.target.value, unit_price_ht: p?.purchase_price_ht ?? "0" });
+                        }}
+                        className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                      >
+                        <option value="">— Produit —</option>
+                        {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="w-20">
+                      <Input type="number" value={line.quantity_ordered} min={1}
+                        onChange={(e) => updateLine(i, { quantity_ordered: parseInt(e.target.value || "1") })}
+                        placeholder="Qté" />
+                    </div>
+                    <div className="w-28">
+                      <Input type="number" step="0.01" value={line.unit_price_ht}
+                        onChange={(e) => updateLine(i, { unit_price_ht: e.target.value })}
+                        placeholder="PA HT" />
+                    </div>
+                    <Button size="icon" variant="ghost" onClick={() => removeLine(i)}>
+                      <Trash2 className="h-4 w-4 text-red-500" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Annuler</Button>
+          <Button onClick={() => mutation.mutate()} disabled={lines.length === 0 || lines.some((l) => !l.product_id) || mutation.isPending}>
+            {mutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            Enregistrer
           </Button>
         </DialogFooter>
       </DialogContent>

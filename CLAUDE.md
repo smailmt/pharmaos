@@ -138,9 +138,12 @@ pharmaos/
 - Tests E2E avec pytest + httpx async (`AsyncClient` + `ASGITransport`).
 - Fixtures dans `tests/conftest.py` : `client`, `registered_user`, `auth_headers`.
 - Pattern : créer les données via l'API (POST), puis vérifier via l'API.
-- **Lancer les tests** : `cd backend && python -m pytest` (≈ 92 tests, ~130s).
-- Toute nouvelle feature = nouveau test E2E qui valide le workflow complet.
+- **Lancer les tests** : `docker compose exec api python -m pytest` (96 tests, ~60s).
+- **Toute modification backend = nouveaux tests E2E obligatoires** : endpoint ajouté → test du happy path + cas d'erreur (ex. statut interdit, tenant wrong, 404).
+- **Lancer la suite complète après chaque changement** pour détecter les régressions — pas seulement le nouveau test.
 - Convention de nommage : `test_<domaine>_workflow.py` pour les workflows métier.
+- Ajouter les nouveaux tests dans le fichier existant du domaine (pas de nouveau fichier si le fichier du domaine existe déjà).
+- ⚠️ Les tests truncatent toutes les tables — ils tournent sur `pharmaos_test` (forcé dans `conftest.py`). Ne jamais lancer pytest avec `POSTGRES_DB=pharmaos` sinon la DB de prod est écrasée. Si la démo est perdue : `docker compose exec api python -m app.scripts.seed`.
 
 ### 4.7 Décimaux & argent
 - Tout l'argent est en `Decimal` (jamais float). Numeric(12,4) pour les prix, (12,2) pour totaux.
@@ -161,7 +164,7 @@ pharmaos/
 
 ## 5. État actuel du projet (à jour)
 
-**92 tests backend verts.** Build frontend clean. Version frontend 0.3.0.
+**96 tests backend verts.** Build frontend clean. Version frontend 0.3.0.
 
 ### Modules fonctionnels et branchés (back + front)
 - **Auth** : register avec auto-création tenant, login, refresh, /me. 4 rôles
@@ -253,7 +256,8 @@ npm run build    # build de prod (doit passer clean)
 
 1. Avant de coder une feature, lire le service et le router du domaine concerné.
 2. Backend d'abord (modèle → migration idempotente → schéma → service → router), puis test E2E.
-3. Lancer `python -m pytest` et vérifier que TOUT passe (pas seulement le nouveau test).
-4. Frontend ensuite, puis `npm run build` pour valider.
-5. Respecter les conventions de la section 4 (multi-tenant, ordre routes, selectinload, Decimal).
-6. Bien penser au contexte marocain (PPV imprimé sur boîte, TVA 7%, CNOPS/CNSS, MAD/DH).
+3. **Écrire les tests AVANT de passer au frontend** : happy path + cas d'erreur pour chaque nouvel endpoint.
+4. **Lancer `docker compose exec api python -m pytest` et vérifier que TOUT passe** — pas seulement le nouveau test. Zéro régression tolérée.
+5. Frontend ensuite, puis vérifier TypeScript avec `frontend/node_modules/.bin/tsc --noEmit`.
+6. Respecter les conventions de la section 4 (multi-tenant, ordre routes, selectinload, Decimal).
+7. Bien penser au contexte marocain (PPV imprimé sur boîte, TVA 7%, CNOPS/CNSS, MAD/DH).
